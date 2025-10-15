@@ -44,10 +44,34 @@ async def send_admin_command(customer_chat_id: str, command: str):
                 print(f"Gửi lệnh '{command}' thành công cho chat_id: {customer_chat_id}")
             else:
                 print(f"Lỗi khi gửi lệnh '{command}': {response.status_code} - {response.text}")
-        except httpx.RequestError as e:
+        except httpx.RequestError as e: 
             print(f"Lỗi kết nối khi gửi lệnh admin: {e}")
-            
-# --- 2. HÀM GỬI TIN NHẮN TRẢ LỜI CHO MESSENGER (Giữ nguyên) ---
+
+async def send_cleaned_message_via_bot(customer_chat_id: str, cleaned_text: str):
+    """Gửi tin nhắn đã làm sạch đến khách hàng thông qua API của bot chính."""
+    if not CHATBOT_URL_PREFIX or not ADMIN_API_KEY:
+        print("LỖI: CHATBOT_URL_PREFIX hoặc ADMIN_API_KEY chưa được cấu hình.")
+        return
+
+    # Sử dụng endpoint send_message của bot chính
+    send_url = f"{CHATBOT_URL_PREFIX}/admin/conversations/send_message"
+    headers = {
+        "Content-Type": "application/json",
+        "api-key": ADMIN_API_KEY
+    }
+    payload = {"chat_id": customer_chat_id, "text": cleaned_text}
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(send_url, headers=headers, json=payload)
+            if response.status_code == 200:
+                print(f"Gửi tin nhắn đã làm sạch thành công tới: {customer_chat_id}")
+            else:
+                print(f"Lỗi khi gửi tin nhắn đã làm sạch: {response.status_code} - {response.text}")
+        except httpx.RequestError as e:
+            print(f"Lỗi kết nối khi gửi tin nhắn đã làm sạch: {e}")
+
+# --- 2. HÀM GỬI TIN NHẮN TRẢ LỜI CHO MESSENGER ---
 async def call_send_api(sender_psid: str, response_payload: dict):
     # ... (code của bạn ở đây, không thay đổi) ...
     url = "https://graph.facebook.com/v19.0/me/messages"
@@ -129,10 +153,23 @@ async def handle_webhook(request: Request):
                         
                         if customer_id:
                             print(f"Phát hiện lệnh '{command}' trong echo cho khách hàng: {customer_id}")
-                            # Gửi lệnh đến bot chính
-                            asyncio.create_task(
+                            # Tách lấy phần tin nhắn và làm sạch
+                            if is_takeover:
+                                cleaned_text = message_text.replace(ADMIN_TAKEOVER_KEY, "").strip()
+                            else: # is_release
+                                cleaned_text = message_text.replace(ADMIN_RELEASE_KEY, "").strip()
+
+                            # Tạo các tác vụ bất đồng bộ
+                            tasks = [
                                 send_admin_command(customer_id, command)
-                            )
+                            ]
+                            
+                            # Chỉ gửi tin nhắn nếu có nội dung
+                            # if cleaned_text:
+                            #     tasks.append(send_cleaned_message_via_bot(customer_id, cleaned_text))
+                            
+                            # Thực thi đồng thời
+                            asyncio.gather(*tasks)
                     continue # Đã xử lý xong echo, bỏ qua các bước sau
 
                 # ===== XỬ LÝ TIN NHẮN THÔNG THƯỜNG (NẾU CÓ) =====
